@@ -1,0 +1,9 @@
+{application, nkactor_store_cql, [
+    {description, "Cassandra driver for Actor Framework"},
+    {vsn, "develop"},
+    {modules, []},
+    {registered, []},
+    {applications, [nkactor]},
+    {env, [
+    ]}
+]}.
