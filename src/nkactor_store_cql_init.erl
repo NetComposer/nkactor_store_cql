@@ -96,17 +96,10 @@ create(SrvId, [actors|Rest]) ->
             uid text,
             data text,
             metadata text,
-            last_update text,
-            is_active boolean,
-            expires text,
             PRIMARY KEY ((namespace,\"group\",resource), name)
         );
     ">>,
     {ok, _} = query(SrvId, Query1),
-    Query2 = <<"
-        CREATE INDEX ON actors (is_active);
-    ">>,
-    {ok, _} = query(SrvId, Query2),
     Query3 = <<"
         INSERT INTO versions (id, version) VALUES ('actors', '1');
     ">>,
@@ -136,12 +129,11 @@ create(SrvId, [actors_index|Rest]) ->
             class text,
             key text,
             value text,
+            uid text,
             namespace text,
             \"group\" text,
             resource text,
             name text,
-            uid text,
-            last_update text,
             PRIMARY KEY ((class, key), value, uid)
         );
     ">>,

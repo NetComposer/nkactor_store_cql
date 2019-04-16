@@ -25,7 +25,7 @@
 
 -export([actor_db_init/1,
          actor_db_find/3, actor_db_read/3, actor_db_create/3, actor_db_update/3,
-         actor_db_add_label/5, actor_db_delete/3, actor_db_search/3, actor_db_aggregate/3]).
+         actor_db_delete/3, actor_db_search/3, actor_db_aggregate/3]).
 
 
 %% ===================================================================
@@ -40,7 +40,7 @@
 
 -type opts() :: #{
     cascade => boolean(),
-    span_local_id => nkserver_ot:id()
+    span_local_id => nkserver_ot:span_id()
 }.
 
 
@@ -74,7 +74,7 @@ actor_db_read(SrvId, ActorId, Opts) ->
     {ok, Meta::map()} | {error, uniqueness_violation|term()} | continue().
 
 actor_db_create(SrvId, Actor, Opts) ->
-    call(SrvId, create, Actor, Opts#{no_unique_check=>true}).
+    call(SrvId, create, Actor, Opts).
 
 
 %% @doc Must update a new actor on disk.
@@ -83,13 +83,6 @@ actor_db_create(SrvId, Actor, Opts) ->
 
 actor_db_update(SrvId, Actor, Opts) ->
     call(SrvId, update, Actor, Opts).
-
-%% @doc
--spec actor_db_add_label(nkserver:id(), Key::binary(), Value::binary(), actor_id(), map()) ->
-    {ok, Meta::map()} | {error, term()}.
-
-actor_db_add_label(SrvId, Key, Value, ActorId, Opts) ->
-    call(SrvId, add_label, {Key, Value, ActorId}, Opts).
 
 
 %% @doc
@@ -109,7 +102,12 @@ actor_db_search(SrvId, Type, Opts) ->
     start_span(CassSrvId, <<"search">>, Opts),
     Result = case nkactor_store_cql_search:search(Type, Opts) of
         {query, Query, Fun} ->
-            nkcassandra:query_all_rows(CassSrvId, Query, #{result_fun=>Fun, nkactor_params=>Opts});
+            case nkcassandra:query(CassSrvId, Query) of
+                {ok, {_, _, Fields}} ->
+                    Fun(Fields, Opts);
+                {error, Error} ->
+                    {error, Error}
+            end;
         {error, Error} ->
             {error, Error}
     end,

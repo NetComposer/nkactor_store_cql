@@ -194,16 +194,33 @@ search(actors_delete_old, Params) ->
 
 
 search(actors_active, Params) ->
-    FromDate = maps:get(from_date, Params, <<>>),
-    Size = maps:get(size, Params, 10),
+    LastUID = maps:get(last_cursor, Params, <<>>),
+    Size = maps:get(size, Params, 100),
     Query = [
-        <<"SELECT uid,namespace,\"group\",resource,name,last_update FROM actors">>,
-        <<" WHERE is_active='T' AND last_update>">>, quote(FromDate),
-        <<" ORDER BY last_update" >>,
+        <<"SELECT uid,namespace,\"group\",resource,name FROM actors_index">>,
+        <<" WHERE class='db' AND key='active' AND value='T' AND ">>,
+        <<" uid>">>, quote(LastUID),
         <<" LIMIT ">>, to_bin(Size),
         <<";">>
     ],
     {query, Query, fun cassandra_active/2};
+
+search(actors_expired, Params) ->
+    LastDate = case maps:find(last_cursor, Params) of
+        {ok, Date0} ->
+            Date0;
+        error ->
+            nklib_date:now_3339(usecs)
+    end,
+    Size = maps:get(size, Params, 100),
+    Query = [
+        <<"SELECT uid,value,namespace,\"group\",resource,name FROM actors_index">>,
+        <<" WHERE class='db' AND key='expires' AND value<">>, quote(LastDate),
+        <<" LIMIT ">>, to_bin(Size),
+        <<";">>
+    ],
+    {query, Query, fun cassandra_expires/2};
+
 
 search(actors_truncate, _) ->
     Query = [<<"TRUNCATE TABLE actors CASCADE;">>],
@@ -322,21 +339,38 @@ cassandra_delete([{{select, _}, [{Total}], _}], Meta) ->
 
 
 %% @private
-cassandra_active([{{select, 0}, [], _OpMeta}], _Meta) ->
-    {ok, [], #{last_date=><<>>, size=>0}};
+cassandra_active([], _Opts) ->
+    {ok, [], #{}};
 
-cassandra_active([{{select, Size}, Rows, _OpMeta}], _Meta) ->
+cassandra_active(Fields, _Opts) ->
     ActorIds = [
         #actor_id{
             uid = UID,
             namespace = Namespace,
             group = Group,
-            resource = Res,
+            resource = Resource,
             name = Name
         }
-        || {UID, Namespace, Group, Res, Name, _Date} <- Rows],
-    [{_, _, _, _, _, LastDate}|_] = lists:reverse(Rows),
-    {ok, ActorIds, #{last_date=>LastDate, size=>Size}}.
+        || [UID, Namespace, Group, Resource, Name] <- Fields],
+    {ok, ActorIds, #{last_cursor=>hd(hd(lists:reverse(Fields)))}}.
+
+
+%% @private
+cassandra_expires([], _Opts) ->
+    {ok, [], #{}};
+
+cassandra_expires(Fields, _Opts) ->
+    ActorIds = [
+        #actor_id{
+            uid = UID,
+            namespace = Namespace,
+            group = Group,
+            resource = Resource,
+            name = Name
+        }
+        || [UID, _Value, Namespace, Group, Resource, Name] <- Fields],
+    [[_, Last|_]|_] = lists:reverse(Fields),
+    {ok, ActorIds, #{last_cursor=>Last}}.
 
 
 %% @private
