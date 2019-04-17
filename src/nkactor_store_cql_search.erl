@@ -21,8 +21,6 @@
 -module(nkactor_store_cql_search).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 -export([search/2]).
--export([cassandra_actors/2, cassandra_delete/2, cassandra_any/2]).
--import(nkactor_sql, [quote/1, filter_path/2]).
 -import(nkactor_store_cql, [query/2, query/3]).
 
 -define(LLOG(Type, Txt, Args), lager:Type("NkACTOR CASSANDRA "++Txt, Args)).
@@ -34,170 +32,159 @@
 %% ===================================================================
 
 
-search(actors_search_linked, Params) ->
-    UID = maps:get(uid, Params),
-    LinkType = maps:get(link_type, Params, any),
-    Namespace = maps:get(namespace, Params, <<>>),
-    Deep = maps:get(deep, Params, false),
-    From = maps:get(from, Params, 0),
-    Limit = maps:get(size, Params, 100),
-    Query = [
-        <<"SELECT uid,link_type FROM links">>,
-        <<" WHERE link_target=">>, quote(to_bin(UID)),
-        case LinkType of
-            any ->
-                <<>>;
-            _ ->
-                [<<" AND link_type=">>, quote(LinkType)]
-        end,
-        <<" AND ">>, filter_path(Namespace, Deep),
-        <<" OFFSET ">>, to_bin(From), <<" LIMIT ">>, to_bin(Limit),
-        <<";">>
-    ],
-    ResultFun = fun(Ops, Meta) ->
-        case Ops of
-            [{{select, _}, [], _OpMeta}] ->
-                {ok, [], Meta};
-            [{{select, Size}, Rows, _OpMeta}] ->
-                {ok, Rows, Meta#{size=>Size}}
-        end
-    end,
-    {query, Query, ResultFun};
+%%search(actors_search_linked, Params) ->
+%%    UID = maps:get(uid, Params),
+%%    LinkType = maps:get(link_type, Params, any),
+%%    Namespace = maps:get(namespace, Params, <<>>),
+%%    Deep = maps:get(deep, Params, false),
+%%    From = maps:get(from, Params, 0),
+%%    Limit = maps:get(size, Params, 100),
+%%    Query = [
+%%        <<"SELECT uid,link_type FROM links">>,
+%%        <<" WHERE link_target=">>, quote(to_bin(UID)),
+%%        case LinkType of
+%%            any ->
+%%                <<>>;
+%%            _ ->
+%%                [<<" AND link_type=">>, quote(LinkType)]
+%%        end,
+%%        <<" AND ">>, filter_path(Namespace, Deep),
+%%        <<" OFFSET ">>, to_bin(From), <<" LIMIT ">>, to_bin(Limit),
+%%        <<";">>
+%%    ],
+%%    ResultFun = fun(Ops, Meta) ->
+%%        case Ops of
+%%            [{{select, _}, [], _OpMeta}] ->
+%%                {ok, [], Meta};
+%%            [{{select, Size}, Rows, _OpMeta}] ->
+%%                {ok, Rows, Meta#{size=>Size}}
+%%        end
+%%    end,
+%%    {query, Query, ResultFun};
+%%
+%%
+%%search(actors_search_fts, Params) ->
+%%    Word = maps:get(word, Params),
+%%    Field = maps:get(field, Params, any),
+%%    Namespace = maps:get(namespace, Params, <<>>),
+%%    Deep = maps:get(deep, Params, false),
+%%    From = maps:get(from, Params, 0),
+%%    Limit = maps:get(size, Params, 100),
+%%    Word2 = nklib_parse:normalize(Word, #{unrecognized=>keep}),
+%%    Last = byte_size(Word2)-1,
+%%    Filter = case Word2 of
+%%        <<Word3:Last/binary, $*>> ->
+%%            [<<"fts_word LIKE ">>, quote(<<Word3/binary, $%>>)];
+%%        _ ->
+%%            [<<"fts_word=">>, quote(Word2)]
+%%    end,
+%%    Query = [
+%%        <<"SELECT uid FROM fts">>,
+%%        <<" WHERE ">>, Filter, <<" AND ">>, filter_path(Namespace, Deep),
+%%        case Field of
+%%            any ->
+%%                [];
+%%            _ ->
+%%                [<<" AND fts_field = ">>, quote(Field)]
+%%        end,
+%%        <<" ORDER BY fts_word" >>,
+%%        <<" OFFSET ">>, to_bin(From), <<" LIMIT ">>, to_bin(Limit),
+%%        <<";">>
+%%    ],
+%%    ResultFun = fun([{{select, _}, List, _OpMeta}],Meta) ->
+%%        List2 = [UID || {UID} <-List],
+%%        {ok, List2, Meta}
+%%    end,
+%%    {query, Query, ResultFun};
+%%
+%%search(actors_search, Params) ->
+%%    case analyze(Params) of
+%%        only_labels ->
+%%            search(actors_search_labels, Params);
+%%        generic ->
+%%            search(actors_search_generic, Params)
+%%    end;
+%%
+%%search(actors_search_generic, Params) ->
+%%    From = maps:get(from, Params, 0),
+%%    Size = maps:get(size, Params, 10),
+%%    Totals = maps:get(totals, Params, false),
+%%    SQLFilters = nkactor_store_pgsql_sql:filters(Params, actors),
+%%    SQLSort = nkactor_store_pgsql_sql:sort(Params, actors),
+%%
+%%    % We could use SELECT COUNT(*) OVER(),src,uid... but it doesn't work if no
+%%    % rows are returned
+%%
+%%    Query = [
+%%        case Totals of
+%%            true ->
+%%                [
+%%                    <<"SELECT COUNT(*) FROM actors">>,
+%%                    SQLFilters,
+%%                    <<";">>
+%%                ];
+%%            false ->
+%%                []
+%%        end,
+%%        nkactor_store_pgsql_sql:select(Params, actors),
+%%        SQLFilters,
+%%        SQLSort,
+%%        <<" OFFSET ">>, to_bin(From), <<" LIMIT ">>, to_bin(Size),
+%%        <<";">>
+%%    ],
+%%    {query, Query, fun ?MODULE:cassandra_actors/2};
 
-
-search(actors_search_fts, Params) ->
-    Word = maps:get(word, Params),
-    Field = maps:get(field, Params, any),
-    Namespace = maps:get(namespace, Params, <<>>),
-    Deep = maps:get(deep, Params, false),
-    From = maps:get(from, Params, 0),
-    Limit = maps:get(size, Params, 100),
-    Word2 = nklib_parse:normalize(Word, #{unrecognized=>keep}),
-    Last = byte_size(Word2)-1,
-    Filter = case Word2 of
-        <<Word3:Last/binary, $*>> ->
-            [<<"fts_word LIKE ">>, quote(<<Word3/binary, $%>>)];
-        _ ->
-            [<<"fts_word=">>, quote(Word2)]
-    end,
-    Query = [
-        <<"SELECT uid FROM fts">>,
-        <<" WHERE ">>, Filter, <<" AND ">>, filter_path(Namespace, Deep),
-        case Field of
-            any ->
-                [];
-            _ ->
-                [<<" AND fts_field = ">>, quote(Field)]
-        end,
-        <<" ORDER BY fts_word" >>,
-        <<" OFFSET ">>, to_bin(From), <<" LIMIT ">>, to_bin(Limit),
-        <<";">>
-    ],
-    ResultFun = fun([{{select, _}, List, _OpMeta}],Meta) ->
-        List2 = [UID || {UID} <-List],
-        {ok, List2, Meta}
-    end,
-    {query, Query, ResultFun};
-
-search(actors_search, Params) ->
-    case analyze(Params) of
-        only_labels ->
-            search(actors_search_labels, Params);
-        generic ->
-            search(actors_search_generic, Params)
+search(actors_search_labels, Params) ->
+    Size = to_bin(maps:get(size, Params, 10)),
+    case check_label(Params) of
+        {ok, Filter, Sort} ->
+            Query = <<
+                "SELECT value,uid,namespace,group,resource,name FROM actors_index",
+                " WHERE class='label' AND ", Filter/binary,
+                Sort/binary,
+                " LIMIT ", Size/binary, ";"
+            >>,
+            {query, Query, fun cassandra_index/2};
+        {error, Error} ->
+            {error, Error}
     end;
 
-search(actors_search_generic, Params) ->
-    From = maps:get(from, Params, 0),
-    Size = maps:get(size, Params, 10),
-    Totals = maps:get(totals, Params, false),
-    SQLFilters = nkactor_sql:filters(Params, actors),
-    SQLSort = nkactor_sql:sort(Params, actors),
-
-    % We could use SELECT COUNT(*) OVER(),src,uid... but it doesn't work if no
-    % rows are returned
-
-    Query = [
-        case Totals of
-            true ->
-                [
-                    <<"SELECT COUNT(*) FROM actors">>,
-                    SQLFilters,
-                    <<";">>
-                ];
-            false ->
-                []
-        end,
-        nkactor_sql:select(Params, actors),
-        SQLFilters,
-        SQLSort,
-        <<" OFFSET ">>, to_bin(From), <<" LIMIT ">>, to_bin(Size),
-        <<";">>
-    ],
-    {query, Query, fun ?MODULE:cassandra_actors/2};
-
-search(actors_search_indices, #{only_uid:=true}=Params) ->
-    From = maps:get(from, Params, 0),
-    Size = maps:get(size, Params, 10),
-    Totals = maps:get(totals, Params, false),
-    SQLFilters = nkactor_sql:filters(Params, labels),
-    SQLSort = nkactor_sql:sort(Params, labels),
-
-    Query = [
-        case Totals of
-            true ->
-                [
-                    <<"SELECT COUNT(*) FROM labels">>,
-                    SQLFilters,
-                    <<";">>
-                ];
-            false ->
-                []
-        end,
-        nkactor_sql:select(Params, labels),
-        SQLFilters,
-        SQLSort,
-        <<" OFFSET ">>, to_bin(From), <<" LIMIT ">>, to_bin(Size),
-        <<";">>
-    ],
-    {query, Query, fun ?MODULE:cassandra_actors/2};
-
-search(actors_delete, Params) ->
-    DoDelete = maps:get(do_delete, Params, false),
-    SQLFilters = nkactor_sql:filters(Params, actors),
-    Query = [
-        case DoDelete of
-            false ->
-                <<"SELECT COUNT(*) FROM actors">>;
-            true ->
-                <<"DELETE FROM actors">>
-        end,
-        SQLFilters,
-        <<";">>
-    ],
-    {query, Query, fun cassandra_delete/2};
-
-search(actors_delete_old, Params) ->
-    Group = maps:get(group, Params),
-    Res = maps:get(resource, Params),
-    Epoch = maps:get(epoch, params),
-    Namespace = maps:get(namespace, Params, <<>>),
-    Deep = maps:get(deep, Params, false),
-    Query = [
-        <<"DELETE FROM actors">>,
-        <<" WHERE \"group\"=">>, quote(Group), <<" AND resource=">>, quote(Res),
-        <<" AND last_update<">>, quote(Epoch),
-        <<" AND ">>, filter_path(Namespace, Deep),
-        <<";">>
-    ],
-    {query, Query, fun cassandra_delete/2};
-
-
+%%search(actors_delete, Params) ->
+%%    DoDelete = maps:get(do_delete, Params, false),
+%%    SQLFilters = nkactor_store_pgsql_sql:filters(Params, actors),
+%%    Query = [
+%%        case DoDelete of
+%%            false ->
+%%                <<"SELECT COUNT(*) FROM actors">>;
+%%            true ->
+%%                <<"DELETE FROM actors">>
+%%        end,
+%%        SQLFilters,
+%%        <<";">>
+%%    ],
+%%    {query, Query, fun cassandra_delete/2};
+%%
+%%search(actors_delete_old, Params) ->
+%%    Group = maps:get(group, Params),
+%%    Res = maps:get(resource, Params),
+%%    Epoch = maps:get(epoch, params),
+%%    Namespace = maps:get(namespace, Params, <<>>),
+%%    Deep = maps:get(deep, Params, false),
+%%    Query = [
+%%        <<"DELETE FROM actors">>,
+%%        <<" WHERE group=">>, quote(Group), <<" AND resource=">>, quote(Res),
+%%        <<" AND last_update<">>, quote(Epoch),
+%%        <<" AND ">>, filter_path(Namespace, Deep),
+%%        <<";">>
+%%    ],
+%%    {query, Query, fun cassandra_delete/2};
+%%
+%%
 search(actors_active, Params) ->
     LastUID = maps:get(last_cursor, Params, <<>>),
     Size = maps:get(size, Params, 100),
     Query = [
-        <<"SELECT uid,namespace,\"group\",resource,name FROM actors_index">>,
+        <<"SELECT uid,namespace,group,resource,name FROM actors_index">>,
         <<" WHERE class='db' AND key='active' AND value='T' AND ">>,
         <<" uid>">>, quote(LastUID),
         <<" LIMIT ">>, to_bin(Size),
@@ -214,7 +201,7 @@ search(actors_expired, Params) ->
     end,
     Size = maps:get(size, Params, 100),
     Query = [
-        <<"SELECT uid,value,namespace,\"group\",resource,name FROM actors_index">>,
+        <<"SELECT uid,value,namespace,group,resource,name FROM actors_index">>,
         <<" WHERE class='db' AND key='expires' AND value<">>, quote(LastDate),
         <<" LIMIT ">>, to_bin(Size),
         <<";">>
@@ -235,45 +222,60 @@ search(SearchType, _Params) ->
 %% Analyze
 %% ===================================================================
 
-%% @private
-analyze(#{filter_fields:=Filter, sort_fields:=Sort, only_uid:=true}) ->
-    case analyze_filter_labels(Filter, false) of
-        true ->
-            case analyze_filter_sort(Sort) of
-                true ->
-                    only_labels;
-                false ->
-                    generic
-            end;
-        false ->
-            generic
-    end;
 
-analyze(_) ->
-    generic.
+%% @private
+check_label(#{filter:=#{'and':=[#{field:=<<"label:", Label/binary>>}=Filter]}}=Params) ->
+    Filter2 = make_filter(Label, Filter),
+    check_label_sort(Params, Label, Filter2);
+
+check_label(_) ->
+    {error, query_invalid}.
 
 
 %% @private
-analyze_filter_labels([], Res) ->
-    Res;
+check_label_sort(#{sort:=[#{field:=<<"label:", Label/binary>>}=Sort]}, Label, Filter) ->
+    Sort2 = case maps:get(order, Sort, asc) of
+        asc -> <<" ORDER BY value ASC ">>;
+        desc -> <<" ORDER BY value DESC ">>
+    end,
+    {ok, Filter, Sort2};
 
-analyze_filter_labels([{<<"metadata.labels.", _/binary>>, _Op}|Rest], _Res) ->
-    analyze_filter_labels(Rest, true);
+check_label_sort(#{sort:=[]}, _Label, Filter) ->
+    {ok, Filter, <<>>};
 
-analyze_filter_labels(_, _Res) ->
-    false.
+check_label_sort(#{sort:=_}, _Label, _Filter) ->
+    {error, query_invalid};
+
+check_label_sort(_, _Label, Filter) ->
+    {ok, Filter, <<>>}.
 
 
-%% @private
-analyze_filter_sort([]) ->
-    true;
 
-analyze_filter_sort([<<"metadata.labels", _/binary>>|Rest]) ->
-    analyze_filter_sort(Rest);
-
-analyze_filter_sort(_) ->
-    false.
-
+make_filter(Label, Filter) ->
+    QLabel = quote(Label),
+    Op = maps:get(op, Filter, eq),
+    Value = maps:get(value, Filter, <<>>),
+    case {Op, Value} of
+        {exists, false} ->
+            <<"key <> ", QLabel/binary>>;
+        {exists, _} ->
+            <<"key = ", QLabel/binary>>;
+        {eq, _} ->
+            <<"key = ", QLabel/binary, " AND value = ", (quote(Value))/binary>>;
+        {ne, _} ->
+            <<"key = ", QLabel/binary, " AND value <> ", (quote(Value))/binary>>;
+        {gt, _} ->
+            <<"key = ", QLabel/binary, " AND value > ", (quote(Value))/binary>>;
+        {gte, _} ->
+            <<"key = ", QLabel/binary, " AND value >= ", (quote(Value))/binary>>;
+        {lt, _} ->
+            <<"key = ", QLabel/binary, " AND value < ", (quote(Value))/binary>>;
+        {lte, _} ->
+            <<"key = ", QLabel/binary, " AND value <= ", (quote(Value))/binary>>;
+        {values, List} ->
+            List2 = nklib_util:bjoin([quote(Val) || Val <-List]),
+            <<"key = ", QLabel/binary, " AND value IN (", List2/binary, ")">>
+    end.
 
 
 
@@ -283,59 +285,24 @@ analyze_filter_sort(_) ->
 
 
 %% @private
-cassandra_actors(Result, Meta) ->
-    % lager:error("NKLOG META ~p", [_Meta]),
-    #{nkactor_params:=Params, cassandra:=#{time:=Time}} = Meta,
-    {Rows, Meta2} = case Result of
-        [{{select, Size}, Rows0, _OpMeta}] ->
-            {Rows0, #{size=>Size, time=>Time}};
-        [{{select, 1}, [{Total}], _}, {{select, Size}, Rows0, _OpMeta}] ->
-            {Rows0, #{size=>Size, total=>Total, time=>Time}}
-    end,
-    GetData = maps:get(get_data, Params, false),
-    GetMeta = maps:get(get_metadata, Params, false),
-    Actors = lists:map(
-        fun
-            ({UID}) ->
-                #{uid => UID};
-            (Row) ->
-                Actor1 = #{
-                    uid => element(1, Row),
-                    namespace => element(2, Row),
-                    group => element(3, Row),
-                    resource => element(4, Row),
-                    name => element(5, Row)
-                },
-                Actor2 = case GetMeta of
-                    true ->
-                        {jsonb, MetaData} = element(6, Row),
-                        Actor1#{metadata => nklib_json:decode(MetaData)};
-                    false ->
-                        Actor1
-                end,
-                Actor3 = case GetData of
-                    true when GetMeta ->
-                        {jsonb, Data} = element(7, Row),
-                        Actor2#{data => nklib_json:decode(Data)};
-                    true ->
-                        {jsonb, Data} = element(6, Row),
-                        Actor2#{data => nklib_json:decode(Data)};
-                    false ->
-                        Actor2
-                end,
-                Actor3
-        end,
-        Rows),
-    {ok, Actors, Meta2}.
+cassandra_index([], _Opts) ->
+    {ok, [], #{}};
 
-
-%% @private
-cassandra_delete([{{delete, Total}, [], _}], Meta) ->
-    {ok, Total, Meta};
-
-
-cassandra_delete([{{select, _}, [{Total}], _}], Meta) ->
-    {ok, Total, Meta}.
+cassandra_index(Fields, _Opts) ->
+    ActorIds = [
+        {
+            Value,
+            #actor_id{
+                uid = UID,
+                namespace = Namespace,
+                group = Group,
+                resource = Resource,
+                name = Name
+            }
+        }
+        || [Value, UID, Namespace, Group, Resource, Name] <- Fields
+    ],
+    {ok, ActorIds, #{last_cursor=>hd(hd(lists:reverse(Fields)))}}.
 
 
 %% @private
@@ -384,5 +351,35 @@ cassandra_any(List, Meta) ->
 
 
 %% @private
+quote(Field) when is_binary(Field) -> <<$', (to_field(Field))/binary, $'>>;
+quote(Field) when is_list(Field) -> <<$', (to_field(Field))/binary, $'>>;
+quote(Field) when is_integer(Field); is_float(Field) -> to_bin(Field);
+quote(true) -> <<"TRUE">>;
+quote(false) -> <<"FALSE">>;
+quote(null) -> <<"NULL">>;
+quote(Field) when is_atom(Field) -> quote(atom_to_binary(Field, utf8));
+quote(Field) when is_map(Field) ->
+    case nklib_json:encode(Field) of
+        error ->
+            lager:error("Error enconding JSON: ~p", [Field]),
+            error(json_encode_error);
+        Json when is_binary(Json)->
+            quote(Json)
+    end.
+
+
+%% @private
+to_field(Field) ->
+    Field2 = to_bin(Field),
+    case binary:match(Field2, <<$'>>) of
+        nomatch ->
+            Field2;
+        _ ->
+            re:replace(Field2, <<$'>>, <<$',$'>>, [global, {return, binary}])
+    end.
+
+
+%% @private
 to_bin(Term) when is_binary(Term) -> Term;
 to_bin(Term) -> nklib_util:to_binary(Term).
+

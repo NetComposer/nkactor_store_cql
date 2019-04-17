@@ -102,7 +102,7 @@ actor_db_search(SrvId, Type, Opts) ->
     start_span(CassSrvId, <<"search">>, Opts),
     Result = case nkactor_store_cql_search:search(Type, Opts) of
         {query, Query, Fun} ->
-            case nkcassandra:query(CassSrvId, Query) of
+            case nkactor_store_cql:query(CassSrvId, Query) of
                 {ok, {_, _, Fields}} ->
                     Fun(Fields, Opts);
                 {error, Error} ->
@@ -124,7 +124,12 @@ actor_db_aggregate(SrvId, Type, Opts) ->
     start_span(CassSrvId, <<"aggregate">>, Opts),
     Result = case nkactor_store_cql_aggregation:aggregation(Type, Opts) of
         {query, Query, Fun} ->
-            nkcassandra:query_all_rows(CassSrvId, Query, #{result_fun=>Fun});
+            case nkactor_store_cql:query(CassSrvId, Query) of
+                {ok, {_, _, Fields}} ->
+                    Fun(Fields, Opts);
+                {error, Error} ->
+                    {error, Error}
+            end;
         {error, Error} ->
             {error, Error}
     end,
