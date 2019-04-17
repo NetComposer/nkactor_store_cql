@@ -26,19 +26,9 @@
 
 -define(LLOG(Type, Txt, Args), lager:Type("NkACTOR CASSANDRA "++Txt, Args)).
 
--define(UUID_COLUMNS, [
-    <<"uid">>,<<"namespace">>,group,<<"resource,name">>
-]).
-
--define(ACTOR_COLUMNS, [
-    <<"namespace">>, group,<<"resource">>,<<"name">>, <<"uid">>,
-    <<"data">>, <<"metadata">>
-]).
-
--define(INDEX_COLUMNS, [
-    <<"class">>, <<"key">>, <<"value">>, <<"uid">>, <<"namespace">>,
-    group, <<"resource">>, <<"name">>
-]).
+-define(ACTOR_COLUMNS, "namespace,group,resource,name,uid,data,metadata").
+-define(UUID_COLUMNS, "uid,namespace,group,resource,name").
+-define(INDEX_COLUMNS, "class,key,value,uid,namespace,group,resource,name").
 
 -include_lib("nkactor/include/nkactor.hrl").
 
@@ -149,25 +139,24 @@ create(SrvId, Actor, #{check_unique:=false}=Opts) ->
         uid = UIDFields,
         add_indices = IndicesFields
     } = Fields,
-    IndexColumns = bjoin(?INDEX_COLUMNS),
     IndexQueries = list_to_binary([
-        <<" INSERT INTO actors_index (", IndexColumns/binary, ")"
+        <<" INSERT INTO actors_index (", ?INDEX_COLUMNS, ")"
         " VALUES (", (bjoin(Values))/binary, ");">>
         || Values <- IndicesFields
     ]),
-    ActorColumns = bjoin(?ACTOR_COLUMNS),
     ActorFields2 = bjoin(ActorFields),
-    UIDColumns = bjoin(?UUID_COLUMNS),
     UIDFields2 = bjoin(UIDFields),
     ActorQuery = <<
         "BEGIN BATCH ",
-        "INSERT INTO actors (", ActorColumns/binary, ") VALUES (", ActorFields2/binary, "); ",
-        "INSERT INTO actors_uid (", UIDColumns/binary, ") VALUES (", UIDFields2/binary, "); ",
+        "INSERT INTO actors (", ?ACTOR_COLUMNS, ") VALUES (", ActorFields2/binary, "); ",
+        "INSERT INTO actors_uid (", ?UUID_COLUMNS, ") VALUES (", UIDFields2/binary, "); ",
         IndexQueries/binary,
         " APPLY BATCH;"
     >>,
     case query(SrvId, ActorQuery) of
         ok ->
+            #{uid:=UID} = Actor,
+            nkactor_store_cql_time_srv:save_time(SrvId, UID, create),
             {ok, #{}};
         {error, Error} ->
             {error, Error}
@@ -179,33 +168,32 @@ create(SrvId, Actor, Opts) ->
         actor = ActorFields,
         uid = UIDFields,
         add_indices = IndicesFields
+
     } = Fields,
-    ActorColumns = bjoin(?ACTOR_COLUMNS),
     ActorFields2 = bjoin(ActorFields),
     Query1 = <<
-        "INSERT INTO actors (", ActorColumns/binary, ") VALUES (",
-        ActorFields2/binary, ") IF NOT EXISTS; "
+        "INSERT INTO actors (", ?ACTOR_COLUMNS, ") VALUES (", ActorFields2/binary, ") IF NOT EXISTS; "
     >>,
     case query(SrvId, Query1) of
         {ok, {_, _, [[false|_]]}} ->
             {error, uniqueness_violation};
         {ok, {_, _, [[true|_]]}} ->
-            IndexColumns = bjoin(?INDEX_COLUMNS),
             IndexQueries = list_to_binary([
-                <<" INSERT INTO actors_index (", IndexColumns/binary, ")"
+                <<" INSERT INTO actors_index (", ?INDEX_COLUMNS, ")"
                 " VALUES (", (bjoin(Values))/binary, ");">>
                 || Values <- IndicesFields
             ]),
-            UIDColumns = bjoin(?UUID_COLUMNS),
             UIDFields2 = bjoin(UIDFields),
             Query2 = <<
                 "BEGIN BATCH ",
-                "INSERT INTO actors_uid (", UIDColumns/binary, ") VALUES (", UIDFields2/binary, "); ",
+                "INSERT INTO actors_uid (", ?UUID_COLUMNS, ") VALUES (", UIDFields2/binary, "); ",
                 IndexQueries/binary,
                 " APPLY BATCH;"
             >>,
             case query(SrvId, Query2) of
                 ok ->
+                    #{uid:=UID} = Actor,
+                    nkactor_store_cql_time_srv:save_time(SrvId, UID, create),
                     {ok, #{}};
                 {error, Error} ->
                     {error, Error}
@@ -238,12 +226,12 @@ update(SrvId, Actor, #{last_metadata:=_}=Opts) ->
     ],
     %lager:error("NKLOG DELETE QUERY ~p", [DeleteQuery]),
     ActorQuery = <<
-        "INSERT INTO actors (", (bjoin(?ACTOR_COLUMNS))/binary, ") "
+        "INSERT INTO actors (", ?ACTOR_COLUMNS, ") "
         "VALUES (", (bjoin(ActorFields))/binary, ");"
     >>,
     IndexQuery = [
         <<
-            "INSERT INTO actors_index (", (bjoin(?INDEX_COLUMNS))/binary, ") "
+            "INSERT INTO actors_index (", ?INDEX_COLUMNS, ") "
             "VALUES (", (bjoin(Values))/binary, ");"
         >>
         || Values <- AddIndices
@@ -257,6 +245,8 @@ update(SrvId, Actor, #{last_metadata:=_}=Opts) ->
     ]),
     case query(SrvId, Query) of
         ok ->
+            #{uid:=UID} = Actor,
+            nkactor_store_cql_time_srv:save_time(SrvId, UID, update),
             {ok, #{}};
         {error, Error} ->
             {error, Error}
@@ -292,6 +282,7 @@ update(SrvId, Actor, #{last_metadata:=_}=Opts) ->
 %% @doc
 %% Option 'cascade' to delete all linked
 delete(SrvId, UID, Opts) when is_binary(UID) ->
+    %nkactor_store_cql_time_srv:save_time(SrvId, UID, delete),
     delete(SrvId, [UID], Opts);
 
 delete(_SrvId, _UIDs, _Opts) ->
@@ -460,11 +451,38 @@ make_links(Old, New, OldMeta, Meta, QUID, QFullName) ->
 
 
 
+%% @private
+quote(Field) when is_binary(Field) -> [$', to_field(Field), $'];
+quote(Field) when is_list(Field) -> [$', to_field(Field), $'];
+quote(Field) when is_integer(Field); is_float(Field) -> to_bin(Field);
+quote(true) -> <<"TRUE">>;
+quote(false) -> <<"FALSE">>;
+quote(null) -> <<"NULL">>;
+quote(Field) when is_atom(Field) -> quote(atom_to_binary(Field, utf8));
+quote(Field) when is_map(Field) ->
+    case nklib_json:encode(Field) of
+        error ->
+            lager:error("Error enconding JSON: ~p", [Field]),
+            error(json_encode_error);
+        Json ->
+            [$', to_field(Json), $']
+    end.
+
 
 
 
 %% @private
-quote(Term) ->
-    list_to_binary([nkactor_sql:quote(Term)]).
+to_field(Field) ->
+    Field2 = to_bin(Field),
+    case binary:match(Field2, <<$'>>) of
+        nomatch ->
+            Field2;
+        _ ->
+            re:replace(Field2, <<$'>>, <<$',$'>>, [global, {return, binary}])
+    end.
 
+
+%% @private
+to_bin(Term) when is_binary(Term) -> Term;
+to_bin(Term) -> nklib_util:to_binary(Term).
 

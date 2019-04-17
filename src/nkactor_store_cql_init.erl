@@ -70,7 +70,7 @@ init(_SrvId, _Tries) ->
 
 %% @private
 create(SrvId) ->
-    create(SrvId, [versions, actors, actors_uid, actors_index]).
+    create(SrvId, [versions, actors, actors_uid, actors_index, actors_time]).
 
 
 create(_SrvId, []) ->
@@ -142,13 +142,31 @@ create(SrvId, [actors_index|Rest]) ->
         INSERT INTO versions (id, version) VALUES ('actors_index', '1');
     ">>,
     ok = query(SrvId, Query2),
+    create(SrvId, Rest);
+
+create(SrvId, [actors_time|Rest]) ->
+    Query1 = <<"
+        CREATE TABLE actors_time (
+            day int,
+            time varint,
+            uid text,
+            op text,
+            PRIMARY KEY (day, time)
+        );
+    ">>,
+    {ok, _} = query(SrvId, Query1),
+    Query2 = <<"
+        INSERT INTO versions (id, version) VALUES ('actors_time', '1');
+    ">>,
+    ok = query(SrvId, Query2),
     create(SrvId, Rest).
+
 
 
 
 %% @private
 drop(SrvId) ->
-    Tables = [actors_uid, actors, actors_index, versions],
+    Tables = [actors_uid, actors, actors_index, actors_time, versions],
     drop(SrvId, Tables).
 
 
@@ -170,6 +188,11 @@ drop(SrvId, [actors_index|Rest]) ->
     _ = query(SrvId, Query),
     drop(SrvId, Rest);
 
+drop(SrvId, [actors_time|Rest]) ->
+    Query = <<"DROP TABLE IF EXISTS actors_time">>,
+    _ = query(SrvId, Query),
+    drop(SrvId, Rest);
+
 drop(SrvId, [versions|Rest]) ->
     Query = <<"DROP TABLE IF EXISTS versions">>,
     _ = query(SrvId, Query),
@@ -179,12 +202,10 @@ drop(SrvId, [versions|Rest]) ->
 
 %% @private
 truncate(SrvId) ->
-    Query1 = <<"TRUNCATE actors">>,
-    ok = query(SrvId, Query1),
-    Query2 = <<"TRUNCATE actors_uid">>,
-    ok = query(SrvId, Query2),
-    Query3 = <<"TRUNCATE actors_index">>,
-    ok = query(SrvId, Query3),
+    ok = query(SrvId, <<"TRUNCATE actors">>),
+    ok = query(SrvId, <<"TRUNCATE actors_uid">>),
+    ok = query(SrvId, <<"TRUNCATE actors_time">>),
+    ok = query(SrvId, <<"TRUNCATE actors_index">>),
     ok.
 
 
