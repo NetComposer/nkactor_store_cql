@@ -20,15 +20,17 @@
 
 -module(nkactor_store_cql_actors).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
--export([find/3, read/3, create/3, update/3, delete/3]).
+-export([find/3, read/3, create/3, update/3, delete/3, quote/1]).
+-export([get_time_day/0, get_time_day/1]).
 -import(nkactor_store_cql, [query/2]).
 -import(nklib_util, [bjoin/1]).
 
 -define(LLOG(Type, Txt, Args), lager:Type("NkACTOR CASSANDRA "++Txt, Args)).
 
 -define(ACTOR_COLUMNS, "namespace,group,resource,name,uid,data,metadata").
--define(UUID_COLUMNS, "uid,namespace,group,resource,name").
+-define(UUID_COLUMNS, "part,uid,namespace,group,resource,name").
 -define(INDEX_COLUMNS, "class,key,value,uid,namespace,group,resource,name").
+-define(UID_PARTITIONS, 1024).
 
 -include_lib("nkactor/include/nkactor.hrl").
 
@@ -70,10 +72,12 @@ find(SrvId, #actor_id{group=Group, resource=Res, name=Name, namespace=Namespace}
     end;
 
 find(SrvId, #actor_id{uid=UID}, _Opts) when is_binary(UID) ->
-    Query = list_to_binary([
-        <<"SELECT namespace,\"group\",resource,name FROM actors_uid">>,
-        <<" WHERE uid=">>, quote(UID), <<";">>
-    ]),
+    QUID = quote(UID),
+    QPart = quote(erlang:phash2(UID) rem ?UID_PARTITIONS),
+    Query = <<
+        "SELECT namespace,group,resource,name FROM actors_uid",
+        " WHERE part=", QPart/binary, " AND uid=", QUID/binary, ";"
+    >>,
     case query(SrvId, Query) of
         {ok, {_, _, [[Namespace, Group, Res, Name]]}} ->
             ActorId2 = #actor_id{
@@ -155,8 +159,7 @@ create(SrvId, Actor, #{check_unique:=false}=Opts) ->
     >>,
     case query(SrvId, ActorQuery) of
         ok ->
-            #{uid:=UID} = Actor,
-            nkactor_store_cql_time_srv:save_time(SrvId, UID, create),
+            save_time(SrvId, Actor, create, Opts),
             {ok, #{}};
         {error, Error} ->
             {error, Error}
@@ -192,8 +195,7 @@ create(SrvId, Actor, Opts) ->
             >>,
             case query(SrvId, Query2) of
                 ok ->
-                    #{uid:=UID} = Actor,
-                    nkactor_store_cql_time_srv:save_time(SrvId, UID, create),
+                    save_time(SrvId, Actor, create, Opts),
                     {ok, #{}};
                 {error, Error} ->
                     {error, Error}
@@ -245,8 +247,7 @@ update(SrvId, Actor, #{last_metadata:=_}=Opts) ->
     ]),
     case query(SrvId, Query) of
         ok ->
-            #{uid:=UID} = Actor,
-            nkactor_store_cql_time_srv:save_time(SrvId, UID, update),
+            save_time(SrvId, Actor, update, Opts),
             {ok, #{}};
         {error, Error} ->
             {error, Error}
@@ -307,6 +308,7 @@ make_fields(Actor, Opts) ->
     } = Actor,
     true = is_binary(UID) andalso UID /= <<>>,
     QUID = quote(UID),
+    QPart = quote(erlang:phash2(UID) rem 1024),
     QNamespace = quote(Namespace),
     QGroup = quote(Group),
     QRes = quote(Res),
@@ -320,7 +322,7 @@ make_fields(Actor, Opts) ->
     {Old6, New6} = {Old5, New5},
     #fields{
         actor = QFullName ++ [QUID, quote(Data), quote(Meta)],
-        uid = [QUID | QFullName],
+        uid = [QPart, QUID | QFullName],
         delete_indices = Old6,
         add_indices = New6
     }.
@@ -451,9 +453,53 @@ make_links(Old, New, OldMeta, Meta, QUID, QFullName) ->
 
 
 
+%% @doc
+get_time_day() ->
+    get_time_day(nklib_date:epoch(usecs)).
+
+
+%% @doc
+get_time_day(Time) ->
+    Time div (24*60*60*1000*1000).
+
+
 %% @private
-quote(Field) when is_binary(Field) -> [$', to_field(Field), $'];
-quote(Field) when is_list(Field) -> [$', to_field(Field), $'];
+save_time(SrvId, Actor, Op, #{save_times:=true}) ->
+    #{
+        namespace := Namespace,
+        group := Group,
+        resource := Res,
+        name := Name,
+        uid := UID
+    } = Actor,
+    Time = nklib_date:epoch(usecs),
+    Query = list_to_binary([
+        <<"INSERT INTO actors_time (day,time,namespace,group,resource,name,uid,op) VALUES (">>,
+        integer_to_binary(get_time_day(Time)), $,,
+        integer_to_binary(Time), $,,
+        quote(Namespace), $,,
+        quote(Group), $,,
+        quote(Res), $,,
+        quote(Name), $,,
+        quote(UID), $,,
+        quote(Op), <<");">>
+    ]),
+    case nkcassandra:query(SrvId, Query) of
+        ok ->
+            ok;
+        {error, Error} ->
+            lager:warning("CQL TIME (~p) could not save: ~p", [SrvId, Error])
+    end;
+
+save_time(_SrvId, _Op, _Actor, _) ->
+    ok.
+
+
+
+
+%% @private
+quote(Field) when is_binary(Field) -> <<$', (to_field(Field))/binary, $'>>;
+quote(Field) when is_list(Field) -> <<$', (to_field(Field))/binary, $'>>;
 quote(Field) when is_integer(Field); is_float(Field) -> to_bin(Field);
 quote(true) -> <<"TRUE">>;
 quote(false) -> <<"FALSE">>;
@@ -464,11 +510,9 @@ quote(Field) when is_map(Field) ->
         error ->
             lager:error("Error enconding JSON: ~p", [Field]),
             error(json_encode_error);
-        Json ->
-            [$', to_field(Json), $']
+        Json when is_binary(Json)->
+            quote(Json)
     end.
-
-
 
 
 %% @private

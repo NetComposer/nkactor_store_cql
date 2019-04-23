@@ -25,7 +25,8 @@
 
 -export([actor_db_init/1,
          actor_db_find/3, actor_db_read/3, actor_db_create/3, actor_db_update/3,
-         actor_db_delete/3, actor_db_search/3, actor_db_aggregate/3]).
+         actor_db_delete/3, actor_db_search/3, actor_db_aggregate/3,
+         actor_db_truncate/2]).
 
 
 %% ===================================================================
@@ -101,6 +102,8 @@ actor_db_search(SrvId, Type, Opts) ->
     CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
     start_span(CassSrvId, <<"search">>, Opts),
     Result = case nkactor_store_cql_search:search(Type, Opts) of
+        {ok, Actors, Meta} ->
+            {ok, Actors, Meta};
         {query, Query, Fun} ->
             case nkactor_store_cql:query(CassSrvId, Query) of
                 {ok, {_, _, Fields}} ->
@@ -137,6 +140,17 @@ actor_db_aggregate(SrvId, Type, Opts) ->
     Result.
 
 
+%% @doc
+-spec actor_db_truncate(id(), opts()) ->
+    {ok, Meta::map()} | {error, term()} | continue().
+
+actor_db_truncate(SrvId, _Opts) ->
+    CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
+    nkactor_store_cql_init:truncate(CassSrvId),
+    {ok, #{}}.
+
+
+
 
 %% ===================================================================
 %% Internal
@@ -146,7 +160,14 @@ actor_db_aggregate(SrvId, Type, Opts) ->
 call(SrvId, Op, Arg, Opts) ->
     CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
     start_span(CassSrvId, Op, Opts),
-    Result = nkactor_store_cql_actors:Op(CassSrvId, Arg, Opts),
+    Opts2 = case Op==create orelse Op==update orelse Op==delete of
+        true ->
+            SaveTimes = nkserver:get_cached_config(SrvId, nkactor_store_cql, save_times),
+            Opts#{save_times=>SaveTimes};
+        false ->
+            Opts
+    end,
+    Result = nkactor_store_cql_actors:Op(CassSrvId, Arg, Opts2),
     stop_span(),
     Result.
 

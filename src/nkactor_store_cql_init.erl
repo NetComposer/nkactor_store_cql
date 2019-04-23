@@ -90,13 +90,13 @@ create(SrvId, [actors|Rest]) ->
     Query1 = <<"
         CREATE TABLE actors (
             namespace text,
-            \"group\" text,
+            group text,
             resource text,
             name text,
             uid text,
             data text,
             metadata text,
-            PRIMARY KEY ((namespace,\"group\",resource), name)
+            PRIMARY KEY ((namespace,group,resource), name)
         );
     ">>,
     {ok, _} = query(SrvId, Query1),
@@ -107,13 +107,16 @@ create(SrvId, [actors|Rest]) ->
     create(SrvId, Rest);
 
 create(SrvId, [actors_uid|Rest]) ->
+    % We use part so that PK is not too disperse
     Query = <<"
         CREATE TABLE actors_uid (
-            uid text PRIMARY KEY,
+            part int,
+            uid text,
             namespace text,
-            \"group\" text,
+            group text,
             resource text,
-            name text
+            name text,
+            PRIMARY KEY (part, uid)
         );
     ">>,
     {ok, _} = query(SrvId, Query),
@@ -131,7 +134,7 @@ create(SrvId, [actors_index|Rest]) ->
             value text,
             uid text,
             namespace text,
-            \"group\" text,
+            group text,
             resource text,
             name text,
             PRIMARY KEY ((class, key), value, uid)
@@ -149,6 +152,10 @@ create(SrvId, [actors_time|Rest]) ->
         CREATE TABLE actors_time (
             day int,
             time varint,
+            namespace text,
+            group text,
+            resource text,
+            name text,
             uid text,
             op text,
             PRIMARY KEY (day, time)

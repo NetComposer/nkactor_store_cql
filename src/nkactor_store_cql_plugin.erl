@@ -41,6 +41,7 @@ plugin_deps() ->
 plugin_config(_SrvId, Config, #{class:=?PACKAGE_CLASS_NKACTOR}) ->
     Syntax = #{
         cassandra_service => atom,
+        cql_save_times => boolean,
         '__mandatory' => [cassandra_service]
     },
     nkserver_util:parse_config(Config, Syntax).
@@ -50,24 +51,26 @@ plugin_config(_SrvId, Config, #{class:=?PACKAGE_CLASS_NKACTOR}) ->
 plugin_cache(_SrvId, Config, _Service) ->
     CassService = maps:get(cassandra_service, Config),
     {ok, #{
-        cassandra_service => CassService
+        cassandra_service => CassService,
+        save_times => maps:get(cql_save_times, Config, true)
     }}.
 
 
-plugin_start(SrvId, _Config, _Service) ->
-    CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
-    Spec = #{
-        id => time_srv,
-        start => {nkactor_store_cql_time_srv, start_link, [SrvId, CassSrvId]},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [nkactor_store_cql_time_srv]
-    },
-    case nkserver_workers_sup:update_child2(SrvId, Spec, #{}) of
-        {ok, _, _Pid} ->
-            nkactor_store_cql_init:init(CassSrvId),
-            ?CALL_SRV(SrvId, actor_db_init, [SrvId]);
-        {error, Error} ->
-            {error, Error}
-    end.
+plugin_start(_SrvId, _Config, _Service) ->
+%%    CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
+%%    Spec = #{
+%%        id => time_srv,
+%%        start => {nkactor_store_cql_time_srv, start_link, [SrvId, CassSrvId]},
+%%        restart => permanent,
+%%        shutdown => 5000,
+%%        type => worker,
+%%        modules => [nkactor_store_cql_time_srv]
+%%    },
+%%    case nkserver_workers_sup:update_child2(SrvId, Spec, #{}) of
+%%        {ok, _, _Pid} ->
+%%            nkactor_store_cql_init:init(CassSrvId),
+%%            ?CALL_SRV(SrvId, actor_db_init, [SrvId]);
+%%        {error, Error} ->
+%%            {error, Error}
+%%    end.
+    ok.
