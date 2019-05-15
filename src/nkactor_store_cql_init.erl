@@ -58,7 +58,7 @@ init(SrvId, Tries) when Tries > 0 ->
             create(SrvId),
             ok;
         {error, Error} ->
-            ?LLOG(notice, "could notcreate database: ~p (~p tries left)", [Error, Tries]),
+            ?LLOG(notice, "could not create database: ~p (~p tries left)", [Error, Tries]),
             timer:sleep(1000),
             init(SrvId, Tries-1)
     end;
