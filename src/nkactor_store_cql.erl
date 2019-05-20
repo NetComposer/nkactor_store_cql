@@ -21,7 +21,7 @@
 -module(nkactor_store_cql).
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 -export([get_cassandra_srv/1]).
--export([query/2]).
+-export([query/2, query/3]).
 -export([truncate/1]).
 
 -define(LLOG(Type, Txt, Args), lager:Type("NkACTOR CASSANDRA "++Txt, Args)).
@@ -49,8 +49,18 @@ get_cassandra_srv(ActorSrvId) ->
     {ok, nkcassandra:result()} | {error, term()}.
 
 query(CassSrvId, Query) ->
-    nkserver_ot:tag(actor_store_cassandra, sql, Query),
-    nkcassandra:query(CassSrvId, Query).
+    query(CassSrvId, Query, #{}).
+
+
+
+%% @doc Performs a query. Must use the Cassandra service
+-spec query(nkserver:id(), string()|binary(), nkcassandra:query_opts()) ->
+    {ok, nkcassandra:result()} | {error, term()}.
+
+query(CassSrvId, Query, Opts) ->
+    nkserver_ot:tag(actor_store_cassandra, <<"cassandra.sql">>, Query),
+    nkcassandra:query(CassSrvId, Query, Opts).
+
 
 
 truncate(ActorSrvId) ->

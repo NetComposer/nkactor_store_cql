@@ -22,7 +22,7 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 -export([find/3, read/3, create/3, update/3, delete/3, quote/1]).
 -export([get_time_day/0, get_time_day/1]).
--import(nkactor_store_cql, [query/2]).
+-import(nkactor_store_cql, [query/3]).
 -import(nklib_util, [bjoin/1]).
 
 -define(LLOG(Type, Txt, Args), lager:Type("NkACTOR CASSANDRA "++Txt, Args)).
@@ -53,7 +53,7 @@
 %% ===================================================================
 
 %% @doc
-find(SrvId, #actor_id{group=Group, resource=Res, name=Name, namespace=Namespace}=ActorId, _Opts)
+find(SrvId, #actor_id{group=Group, resource=Res, name=Name, namespace=Namespace}=ActorId, Opts)
         when is_binary(Group), is_binary(Res), is_binary(Name), is_binary(Namespace) ->
     Query = list_to_binary([
         <<"SELECT uid FROM actors">>,
@@ -62,7 +62,7 @@ find(SrvId, #actor_id{group=Group, resource=Res, name=Name, namespace=Namespace}
         <<" AND resource=">>, quote(Res),
         <<" AND name=">>, quote(Name), <<";">>
     ]),
-    case query(SrvId, Query) of
+    case query(SrvId, Query, Opts) of
         {ok, {_, _, [[UID2]]}} ->
             {ok, ActorId#actor_id{uid=UID2, pid=undefined}, #{}};
         {ok, {_, _, []}} ->
@@ -78,7 +78,7 @@ find(SrvId, #actor_id{uid=UID}, _Opts) when is_binary(UID) ->
         "SELECT namespace,group,resource,name FROM actors_uid",
         " WHERE part=", QPart/binary, " AND uid=", QUID/binary, ";"
     >>,
-    case query(SrvId, Query) of
+    case query(SrvId, Query, #{span_op=><<"ActorFind">>}) of
         {ok, {_, _, [[Namespace, Group, Res, Name]]}} ->
             ActorId2 = #actor_id{
                 uid = UID,
@@ -105,7 +105,7 @@ read(SrvId, #actor_id{namespace=Namespace, group=Group, resource=Res, name=Name}
             <<" AND resource=">>, quote(Res),
             <<" AND name=">>, quote(Name), <<";">>
         ]),
-        case query(SrvId, Query) of
+        case query(SrvId, Query, #{span_op=><<"ActorRead">>}) of
             {ok, {_, _, [[UID, Meta, Data]]}} ->
                 Actor = #{
                     group => Group,
@@ -157,7 +157,11 @@ create(SrvId, Actor, #{check_unique:=false}=Opts) ->
         IndexQueries/binary,
         " APPLY BATCH;"
     >>,
-    case query(SrvId, ActorQuery) of
+    QueryOpts = #{
+        span_op => <<"ActorCreate">>,
+        span_tags => #{<<"actor.uid">> => maps:get(uid, Actor)}
+    },
+    case query(SrvId, ActorQuery, QueryOpts) of
         ok ->
             save_time(SrvId, Actor, create, Opts),
             {ok, #{}};
@@ -177,7 +181,11 @@ create(SrvId, Actor, Opts) ->
     Query1 = <<
         "INSERT INTO actors (", ?ACTOR_COLUMNS, ") VALUES (", ActorFields2/binary, ") IF NOT EXISTS; "
     >>,
-    case query(SrvId, Query1) of
+    QueryOpts = #{
+        span_op => <<"ActorCreate (1/2)">>,
+        span_tags => #{<<"actor.uid">> => maps:get(uid, Actor)}
+    },
+    case query(SrvId, Query1, QueryOpts) of
         {ok, {_, _, [[false|_]]}} ->
             {error, uniqueness_violation};
         {ok, {_, _, [[true|_]]}} ->
@@ -193,7 +201,8 @@ create(SrvId, Actor, Opts) ->
                 IndexQueries/binary,
                 " APPLY BATCH;"
             >>,
-            case query(SrvId, Query2) of
+            QueryOpts2 = QueryOpts#{span_op => <<"ActorCreate (2/2)">>},
+            case query(SrvId, Query2, QueryOpts2) of
                 ok ->
                     save_time(SrvId, Actor, create, Opts),
                     {ok, #{}};
@@ -245,7 +254,11 @@ update(SrvId, Actor, #{last_metadata:=_}=Opts) ->
         IndexQuery,
         <<" APPLY BATCH;">>
     ]),
-    case query(SrvId, Query) of
+    QueryOpts = #{
+        span_op => <<"ActorUpdate">>,
+        span_tags => #{<<"actor.uid">> => maps:get(uid, Actor)}
+    },
+    case query(SrvId, Query, QueryOpts) of
         ok ->
             save_time(SrvId, Actor, update, Opts),
             {ok, #{}};

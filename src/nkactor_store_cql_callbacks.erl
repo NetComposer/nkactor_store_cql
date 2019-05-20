@@ -105,7 +105,7 @@ actor_db_search(SrvId, Type, Opts) ->
         {ok, Actors, Meta} ->
             {ok, Actors, Meta};
         {query, Query, Fun} ->
-            case nkactor_store_cql:query(CassSrvId, Query) of
+            case nkactor_store_cql:query(CassSrvId, Query, #{span_op=><<"ActorSearch">>}) of
                 {ok, {_, _, Fields}} ->
                     Fun(Fields, Opts);
                 {error, Error} ->
@@ -127,7 +127,7 @@ actor_db_aggregate(SrvId, Type, Opts) ->
     start_span(CassSrvId, <<"aggregate">>, Opts),
     Result = case nkactor_store_cql_aggregation:aggregation(Type, Opts) of
         {query, Query, Fun} ->
-            case nkactor_store_cql:query(CassSrvId, Query) of
+            case nkactor_store_cql:query(CassSrvId, Query, #{span_op=><<"ActorAggegate">>}) of
                 {ok, {_, _, Fields}} ->
                     Fun(Fields, Opts);
                 {error, Error} ->
