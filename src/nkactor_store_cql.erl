@@ -38,7 +38,7 @@
 %% ===================================================================
 
 
-%% @doc
+%% @doc Gets configured cassandra service for actors
 get_cassandra_srv(ActorSrvId) ->
     nkserver:get_cached_config(ActorSrvId, nkactor_store_cql, cassandra_service).
 
@@ -62,6 +62,6 @@ query(CassSrvId, Query, Opts) ->
     nkcassandra:query(CassSrvId, Query, Opts).
 
 
-
+%% @doc Truncate all actors in db
 truncate(ActorSrvId) ->
     nkactor_store_cql_init:truncate(get_cassandra_srv(ActorSrvId)).

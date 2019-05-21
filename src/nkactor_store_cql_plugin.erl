@@ -36,26 +36,29 @@ plugin_deps() ->
     [nkactor].
 
 
-
 %% @doc
 plugin_config(_SrvId, Config, #{class:=?PACKAGE_CLASS_NKACTOR}) ->
     Syntax = #{
         cassandra_service => atom,
-        cql_save_times => boolean,
-        '__mandatory' => [cassandra_service]
+        cql_save_times => boolean
     },
     nkserver_util:parse_config(Config, Syntax).
 
 
 %% @doc
 plugin_cache(_SrvId, Config, _Service) ->
-    CassService = maps:get(cassandra_service, Config),
+    CassService = maps:get(cassandra_service, Config, undefined),
     {ok, #{
         cassandra_service => CassService,
         save_times => maps:get(cql_save_times, Config, true)
     }}.
 
 
+%% @doc
 plugin_start(SrvId, _Config, _Service) ->
-    CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
-    nkactor_store_cql_init:init(CassSrvId).
+    case nkactor_store_cql:get_cassandra_srv(SrvId) of
+        undefined ->
+            ok;
+        CassSrvId ->
+            nkactor_store_cql_init:init(CassSrvId)
+    end.

@@ -99,23 +99,27 @@ actor_db_delete(SrvId, UIDs, Opts) ->
     {ok, [actor_id()], Meta::map()} | {error, term()} | continue().
 
 actor_db_search(SrvId, Type, Opts) ->
-    CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
-    start_span(CassSrvId, <<"search">>, Opts),
-    Result = case nkactor_store_cql_search:search(Type, Opts) of
-        {ok, Actors, Meta} ->
-            {ok, Actors, Meta};
-        {query, Query, Fun} ->
-            case nkactor_store_cql:query(CassSrvId, Query, #{span_op=><<"ActorSearch">>}) of
-                {ok, {_, _, Fields}} ->
-                    Fun(Fields, Opts);
+    case nkactor_store_cql:get_cassandra_srv(SrvId) of
+        undefined ->
+            continue;
+        CassSrvId ->
+            start_span(CassSrvId, <<"search">>, Opts),
+            Result = case nkactor_store_cql_search:search(Type, Opts) of
+                {ok, Actors, Meta} ->
+                    {ok, Actors, Meta};
+                {query, Query, Fun} ->
+                    case nkactor_store_cql:query(CassSrvId, Query, #{span_op=><<"ActorSearch">>}) of
+                        {ok, {_, _, Fields}} ->
+                            Fun(Fields, Opts);
+                        {error, Error} ->
+                            {error, Error}
+                    end;
                 {error, Error} ->
                     {error, Error}
-            end;
-        {error, Error} ->
-            {error, Error}
-    end,
-    stop_span(),
-    Result.
+            end,
+            stop_span(),
+            Result
+    end.
 
 
 %% @doc
@@ -123,21 +127,25 @@ actor_db_search(SrvId, Type, Opts) ->
     {ok, [actor_id()], Meta::map()} | {error, term()} | continue().
 
 actor_db_aggregate(SrvId, Type, Opts) ->
-    CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
-    start_span(CassSrvId, <<"aggregate">>, Opts),
-    Result = case nkactor_store_cql_aggregation:aggregation(Type, Opts) of
-        {query, Query, Fun} ->
-            case nkactor_store_cql:query(CassSrvId, Query, #{span_op=><<"ActorAggegate">>}) of
-                {ok, {_, _, Fields}} ->
-                    Fun(Fields, Opts);
+    case nkactor_store_cql:get_cassandra_srv(SrvId) of
+        undefined ->
+            continue;
+        CassSrvId ->
+            start_span(CassSrvId, <<"aggregate">>, Opts),
+            Result = case nkactor_store_cql_aggregation:aggregation(Type, Opts) of
+                {query, Query, Fun} ->
+                    case nkactor_store_cql:query(CassSrvId, Query, #{span_op=><<"ActorAggegate">>}) of
+                        {ok, {_, _, Fields}} ->
+                            Fun(Fields, Opts);
+                        {error, Error} ->
+                            {error, Error}
+                    end;
                 {error, Error} ->
                     {error, Error}
-            end;
-        {error, Error} ->
-            {error, Error}
-    end,
-    stop_span(),
-    Result.
+            end,
+            stop_span(),
+            Result
+    end.
 
 
 %% @doc
@@ -145,9 +153,13 @@ actor_db_aggregate(SrvId, Type, Opts) ->
     {ok, Meta::map()} | {error, term()} | continue().
 
 actor_db_truncate(SrvId, _Opts) ->
-    CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
-    nkactor_store_cql_init:truncate(CassSrvId),
-    {ok, #{}}.
+    case nkactor_store_cql:get_cassandra_srv(SrvId) of
+        undefined ->
+            continue;
+        CassSrvId ->
+            nkactor_store_cql_init:truncate(CassSrvId),
+            {ok, #{}}
+    end.
 
 
 
@@ -158,18 +170,22 @@ actor_db_truncate(SrvId, _Opts) ->
 
 %% @private
 call(SrvId, Op, Arg, Opts) ->
-    CassSrvId = nkactor_store_cql:get_cassandra_srv(SrvId),
-    start_span(CassSrvId, Op, Opts),
-    Opts2 = case Op==create orelse Op==update orelse Op==delete of
-        true ->
-            SaveTimes = nkserver:get_cached_config(SrvId, nkactor_store_cql, save_times),
-            Opts#{save_times=>SaveTimes};
-        false ->
-            Opts
-    end,
-    Result = nkactor_store_cql_actors:Op(CassSrvId, Arg, Opts2),
-    stop_span(),
-    Result.
+    case nkactor_store_cql:get_cassandra_srv(SrvId) of
+        undefined ->
+            ok;
+        CassSrvId ->
+            start_span(CassSrvId, Op, Opts),
+            Opts2 = case Op==create orelse Op==update orelse Op==delete of
+                true ->
+                    SaveTimes = nkserver:get_cached_config(SrvId, nkactor_store_cql, save_times),
+                    Opts#{save_times=>SaveTimes};
+                false ->
+                    Opts
+            end,
+            Result = nkactor_store_cql_actors:Op(CassSrvId, Arg, Opts2),
+            stop_span(),
+            Result
+    end.
 
 
 %% @private
