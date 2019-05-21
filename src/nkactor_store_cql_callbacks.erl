@@ -172,7 +172,7 @@ actor_db_truncate(SrvId, _Opts) ->
 call(SrvId, Op, Arg, Opts) ->
     case nkactor_store_cql:get_cassandra_srv(SrvId) of
         undefined ->
-            ok;
+            continue;
         CassSrvId ->
             start_span(CassSrvId, Op, Opts),
             Opts2 = case Op==create orelse Op==update orelse Op==delete of
