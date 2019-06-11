@@ -24,6 +24,8 @@
 -export([query/2, query/3]).
 -export([truncate/1]).
 
+-include("nkactor_store_cql.hrl").
+
 -define(LLOG(Type, Txt, Args), lager:Type("NkACTOR CASSANDRA "++Txt, Args)).
 
 
@@ -58,7 +60,7 @@ query(CassSrvId, Query) ->
     {ok, nkcassandra:result()} | {error, term()}.
 
 query(CassSrvId, Query, Opts) ->
-    nkserver_ot:tag(actor_store_cassandra, <<"cassandra.sql">>, Query),
+    nkserver_ot:tag(?CQL_SPAN, <<"cassandra.sql">>, Query),
     nkcassandra:query(CassSrvId, Query, Opts).
 
 

@@ -33,6 +33,8 @@
 -define(UID_PARTITIONS, 1024).
 
 -include_lib("nkactor/include/nkactor.hrl").
+-include("nkactor_store_cql.hrl").
+
 
 %% ===================================================================
 %% Types

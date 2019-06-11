@@ -28,6 +28,8 @@
          actor_db_delete/3, actor_db_search/3, actor_db_aggregate/3,
          actor_db_truncate/2]).
 
+-include("nkactor_store_cql.hrl").
+
 
 %% ===================================================================
 %% Persistence callbacks
@@ -39,10 +41,7 @@
 
 -type continue() :: nkserver_callbacks:continue().
 
--type opts() :: #{
-    cascade => boolean(),
-    span_local_id => nkserver_ot:span_id()
-}.
+-type db_opts() :: nkactor_callbacks:db_opts().
 
 
 %% @doc Called after the core has initialized the database
@@ -55,7 +54,7 @@ actor_db_init(_SrvId) ->
 
 %% @doc Must find an actor on disk by UID (if available) or name, and return
 %% full actor_id data
--spec actor_db_find(id(), actor_id(), opts()) ->
+-spec actor_db_find(id(), actor_id(), db_opts()) ->
     {ok, actor_id(), Meta::map()} | {error, actor_not_found|term()} | continue().
 
 actor_db_find(SrvId, ActorId, Opts) ->
@@ -63,15 +62,25 @@ actor_db_find(SrvId, ActorId, Opts) ->
 
 
 %% @doc Must find and read a full actor on disk by UID (if available) or name
--spec actor_db_read(id(), actor_id(), opts()) ->
+-spec actor_db_read(id(), actor_id(), db_opts()) ->
     {ok, nkactor:actor(), Meta::map()} | {error, actor_not_found|term()} | continue().
 
 actor_db_read(SrvId, ActorId, Opts) ->
-    call(SrvId, read, ActorId, Opts).
+    case call(SrvId, read, [ActorId], Opts) of
+        {ok, RawActor, Meta} ->
+            case nkactor_syntax:parse_actor(RawActor) of
+                {ok, Actor} ->
+                    {ok, Actor, Meta};
+                {error, Error} ->
+                    {error, Error}
+            end;
+        {error, Error} ->
+            {error, Error}
+    end.
 
 
 %% @doc Must create a new actor on disk. Should fail if already present
--spec actor_db_create(id(), actor(), opts()) ->
+-spec actor_db_create(id(), actor(), db_opts()) ->
     {ok, Meta::map()} | {error, uniqueness_violation|term()} | continue().
 
 actor_db_create(SrvId, Actor, Opts) ->
@@ -79,7 +88,7 @@ actor_db_create(SrvId, Actor, Opts) ->
 
 
 %% @doc Must update a new actor on disk.
--spec actor_db_update(id(), actor(), opts()) ->
+-spec actor_db_update(id(), actor(), db_opts()) ->
     {ok, Meta::map()} | {error, term()} | continue().
 
 actor_db_update(SrvId, Actor, Opts) ->
@@ -87,7 +96,7 @@ actor_db_update(SrvId, Actor, Opts) ->
 
 
 %% @doc
--spec actor_db_delete(id(), [nkactor:uid()], opts()) ->
+-spec actor_db_delete(id(), [nkactor:uid()], db_opts()) ->
     {ok, [actor_id()], Meta::map()} | {error, term()} | continue().
 
 actor_db_delete(SrvId, UIDs, Opts) ->
@@ -95,7 +104,7 @@ actor_db_delete(SrvId, UIDs, Opts) ->
 
 
 %% @doc
--spec actor_db_search(id(), nkactor_backend:search_type(), opts()) ->
+-spec actor_db_search(id(), nkactor_backend:search_type(), db_opts()) ->
     {ok, [actor_id()], Meta::map()} | {error, term()} | continue().
 
 actor_db_search(SrvId, Type, Opts) ->
@@ -123,7 +132,7 @@ actor_db_search(SrvId, Type, Opts) ->
 
 
 %% @doc
--spec actor_db_aggregate(id(), nkactor_backend:agg_type(), opts()) ->
+-spec actor_db_aggregate(id(), nkactor_backend:agg_type(), db_opts()) ->
     {ok, [actor_id()], Meta::map()} | {error, term()} | continue().
 
 actor_db_aggregate(SrvId, Type, Opts) ->
@@ -149,7 +158,7 @@ actor_db_aggregate(SrvId, Type, Opts) ->
 
 
 %% @doc
--spec actor_db_truncate(id(), opts()) ->
+-spec actor_db_truncate(id(), db_opts()) ->
     {ok, Meta::map()} | {error, term()} | continue().
 
 actor_db_truncate(SrvId, _Opts) ->
@@ -188,20 +197,19 @@ call(SrvId, Op, Arg, Opts) ->
     end.
 
 
-%% @private
 start_span(SrvId, Op, Opts) ->
-    case Opts of
-        #{parent_span:=Parent} ->
-            SpanName = <<"CASSANDRA::", (nklib_util:to_binary(Op))/binary>>,
-            nkserver_ot:new(actor_store_cassandra, SrvId, SpanName, Parent);
-        #{trace_id:=TraceId} ->
-            SpanName = <<"CASSANDRA::", (nklib_util:to_binary(Op))/binary>>,
-            nkserver_ot:new(actor_store_cassandra, SrvId, SpanName, {TraceId, undefined});
+    SpanId = maps:get(span_id, Opts, undefined),
+    nkserver_ot:log(SpanId, <<"performig db operation: ~p">>, [Op]),
+    ParentSpan = case SpanId of
+        undefined ->
+            maps:get(parent_span, Opts, undefined);
         _ ->
-            ok
-    end.
+            SpanId
+    end,
+    SpanName = <<"CASSANDRA::", (nklib_util:to_binary(Op))/binary>>,
+    nkserver_ot:new(?CQL_SPAN, SrvId, SpanName, ParentSpan).
 
 
 %% @private
 stop_span() ->
-    nkserver_ot:finish(actor_store_cassandra).
+    nkserver_ot:finish(?CQL_SPAN).
