@@ -213,6 +213,6 @@ truncate(SrvId) ->
     ok = query(SrvId, <<"TRUNCATE actors_uid">>),
     ok = query(SrvId, <<"TRUNCATE actors_time">>),
     ok = query(SrvId, <<"TRUNCATE actors_index">>),
-    ok.
+    {ok, #{}}.
 
 

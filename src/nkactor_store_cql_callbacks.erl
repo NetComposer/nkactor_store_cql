@@ -23,12 +23,37 @@
 -author('Carlos Gonzalez <carlosj.gf@gmail.com>').
 
 
+-export([actor_store_cql_parse/4, actor_store_cql_unparse/4]).
 -export([actor_db_init/1,
          actor_db_find/3, actor_db_read/3, actor_db_create/3, actor_db_update/3,
          actor_db_delete/3, actor_db_search/3, actor_db_aggregate/3,
          actor_db_truncate/2]).
 
+
 -include("nkactor_store_cql.hrl").
+-include_lib("nkserver/include/nkserver.hrl").
+
+
+%% ===================================================================
+%% Offered callbacks
+%% ===================================================================
+
+
+%% @doc Called after reading the actor, to process further de-serializations
+-spec actor_store_cql_parse(nkserver:id(), nkactor:actor(), map(), db_opts()) ->
+    {ok, nkactor:actor(), map()} | {error, term()}.
+
+actor_store_cql_parse(_SrvId, Actor, Meta, _Opts) ->
+    {ok, Actor, Meta}.
+
+
+%% @doc Called before saving the actor, to process further serializations
+-spec actor_store_cql_parse(nkserver:id(), nkactor:actor(), create|updated, db_opts()) ->
+    {ok, nkactor:actor()} | {error, term()}.
+
+actor_store_cql_unparse(_SrvId, _Op, Actor, _Opts) ->
+    {ok, Actor}.
+
 
 
 %% ===================================================================
@@ -70,7 +95,7 @@ actor_db_read(SrvId, ActorId, Opts) ->
         {ok, RawActor, Meta} ->
             case nkactor_syntax:parse_actor(RawActor) of
                 {ok, Actor} ->
-                    {ok, Actor, Meta};
+                    ?CALL_SRV(SrvId, actor_store_cql_parse, [SrvId, Actor, Opts, Meta]);
                 {error, Error} ->
                     {error, Error}
             end;
@@ -84,7 +109,12 @@ actor_db_read(SrvId, ActorId, Opts) ->
     {ok, Meta::map()} | {error, uniqueness_violation|term()} | continue().
 
 actor_db_create(SrvId, Actor, Opts) ->
-    call(SrvId, create, Actor, Opts).
+    case ?CALL_SRV(SrvId, actor_store_cql_unparse, [SrvId, create, Actor, Opts]) of
+        {ok, Actor2} ->
+            call(SrvId, create, [Actor2], Opts);
+        {error, Error} ->
+            {error, Error}
+    end.
 
 
 %% @doc Must update a new actor on disk.
@@ -92,7 +122,12 @@ actor_db_create(SrvId, Actor, Opts) ->
     {ok, Meta::map()} | {error, term()} | continue().
 
 actor_db_update(SrvId, Actor, Opts) ->
-    call(SrvId, update, Actor, Opts).
+    case ?CALL_SRV(SrvId, actor_store_cql_unparse, [SrvId, update, Actor, Opts]) of
+        {ok, Actor2} ->
+            call(SrvId, update, [Actor2], Opts);
+        {error, Error} ->
+            {error, Error}
+    end.
 
 
 %% @doc
@@ -117,7 +152,7 @@ actor_db_search(SrvId, Type, Opts) ->
                 {ok, Actors, Meta} ->
                     {ok, Actors, Meta};
                 {query, Query, Fun} ->
-                    case nkactor_store_cql:query(CassSrvId, Query, #{span_op=><<"ActorSearch">>}) of
+                    case nkactor_store_cql:query(CassSrvId, Query, #{}) of
                         {ok, {_, _, Fields}} ->
                             Fun(Fields, Opts);
                         {error, Error} ->
@@ -143,7 +178,7 @@ actor_db_aggregate(SrvId, Type, Opts) ->
             start_span(CassSrvId, <<"aggregate">>, Opts),
             Result = case nkactor_store_cql_aggregation:aggregation(Type, Opts) of
                 {query, Query, Fun} ->
-                    case nkactor_store_cql:query(CassSrvId, Query, #{span_op=><<"ActorAggegate">>}) of
+                    case nkactor_store_cql:query(CassSrvId, Query, #{}) of
                         {ok, {_, _, Fields}} ->
                             Fun(Fields, Opts);
                         {error, Error} ->
@@ -166,8 +201,7 @@ actor_db_truncate(SrvId, _Opts) ->
         undefined ->
             continue;
         CassSrvId ->
-            nkactor_store_cql_init:truncate(CassSrvId),
-            {ok, #{}}
+            nkactor_store_cql_init:truncate(CassSrvId)
     end.
 
 
@@ -197,6 +231,7 @@ call(SrvId, Op, Arg, Opts) ->
     end.
 
 
+%% @private
 start_span(SrvId, Op, Opts) ->
     ParentSpan = maps:get(ot_span_id, Opts, undefined),
     SpanName = <<"CASSANDRA::", (nklib_util:to_binary(Op))/binary>>,
