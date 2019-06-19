@@ -48,7 +48,7 @@ actor_store_cql_parse(_SrvId, Actor, Meta, _Opts) ->
 
 
 %% @doc Called before saving the actor, to process further serializations
--spec actor_store_cql_parse(nkserver:id(), nkactor:actor(), create|updated, db_opts()) ->
+-spec actor_store_cql_unparse(nkserver:id(), nkactor:actor(), create|updated, db_opts()) ->
     {ok, nkactor:actor()} | {error, term()}.
 
 actor_store_cql_unparse(_SrvId, _Op, Actor, _Opts) ->
