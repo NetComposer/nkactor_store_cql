@@ -111,7 +111,7 @@ actor_db_read(SrvId, ActorId, Opts) ->
 actor_db_create(SrvId, Actor, Opts) ->
     case ?CALL_SRV(SrvId, actor_store_cql_unparse, [SrvId, create, Actor, Opts]) of
         {ok, Actor2} ->
-            call(SrvId, create, [Actor2], Opts);
+            call(SrvId, create, Actor2, Opts);
         {error, Error} ->
             {error, Error}
     end.
@@ -124,18 +124,18 @@ actor_db_create(SrvId, Actor, Opts) ->
 actor_db_update(SrvId, Actor, Opts) ->
     case ?CALL_SRV(SrvId, actor_store_cql_unparse, [SrvId, update, Actor, Opts]) of
         {ok, Actor2} ->
-            call(SrvId, update, [Actor2], Opts);
+            call(SrvId, update, Actor2, Opts);
         {error, Error} ->
             {error, Error}
     end.
 
 
 %% @doc
--spec actor_db_delete(id(), [nkactor:uid()], db_opts()) ->
+-spec actor_db_delete(id(), actor_id(), db_opts()) ->
     {ok, [actor_id()], Meta::map()} | {error, term()} | continue().
 
-actor_db_delete(SrvId, UIDs, Opts) ->
-    call(SrvId, delete, UIDs, Opts).
+actor_db_delete(SrvId, ActorId, Opts) ->
+    call(SrvId, delete, ActorId, Opts).
 
 
 %% @doc

@@ -37,7 +37,7 @@ plugin_deps() ->
 
 
 %% @doc
-plugin_config(_SrvId, Config, #{class:=?PACKAGE_CLASS_NKACTOR}) ->
+plugin_config(_SrvId, Config, #{class:=nkactor}) ->
     Syntax = #{
         cassandra_service => atom,
         cql_save_times => boolean
