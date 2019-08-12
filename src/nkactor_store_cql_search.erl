@@ -108,7 +108,7 @@
 %%search(actors_search_generic, Params) ->
 %%    From = maps:get(from, Params, 0),
 %%    Size = maps:get(size, Params, 10),
-%%    Totals = maps:get(totals, Params, false),
+%%    Totals = maps:get(get_total, Params, false),
 %%    SQLFilters = nkactor_store_pgsql_sql:filters(Params, actors),
 %%    SQLSort = nkactor_store_pgsql_sql:sort(Params, actors),
 %%
@@ -206,7 +206,7 @@ search(actors_expired, Params) ->
         <<" LIMIT ">>, to_bin(Size),
         <<";">>
     ],
-    {query, Query, fun cassandra_expires/2};
+    {query, Query, fun cassandra_expired/2};
 
 
 search(actors_truncate, _) ->
@@ -323,10 +323,10 @@ cassandra_active(Fields, _Opts) ->
 
 
 %% @private
-cassandra_expires([], _Opts) ->
+cassandra_expired([], _Opts) ->
     {ok, [], #{}};
 
-cassandra_expires(Fields, _Opts) ->
+cassandra_expired(Fields, _Opts) ->
     ActorIds = [
         #actor_id{
             uid = UID,
