@@ -138,7 +138,7 @@ read(SrvId, #actor_id{uid=UID}, Opts) when is_binary(UID) ->
 %% no_unique_check: do not check uniqueness
 %% no_indices: do not generate entries in index table
 
-create(SrvId, Actor, #{check_unique:=false}=Opts) ->
+create(SrvId, Actor, #{no_unique_check:=false}=Opts) ->
     Fields = make_fields(Actor, Opts),
     #fields{
         actor = ActorFields,
