@@ -330,8 +330,7 @@ make_fields(Actor, Opts) ->
     QName = quote(Name),
     QFullName = [QNamespace, QGroup, QRes, QName],
     OldMeta = maps:get(last_metadata, Opts, #{}),
-    {Old2, New2} = make_is_active([], [], OldMeta, Meta, QUID, QFullName),
-    {Old3, New3} = make_expires(Old2, New2, OldMeta, Meta, QUID, QFullName),
+    {Old3, New3} = make_activate_time([], [], OldMeta, Meta, QUID, QFullName),
     {Old4, New4} = make_labels(Old3, New3, OldMeta, Meta, QUID, QFullName),
     {Old5, New5} = make_links(Old4, New4, OldMeta, Meta, QUID, QFullName),
     {Old6, New6} = {Old5, New5},
@@ -343,49 +342,49 @@ make_fields(Actor, Opts) ->
     }.
 
 
-make_is_active(Old, New, OldMeta, Meta, QUID, QFullName) ->
-    NewIsActive = maps:get(is_active, Meta, false),
-    OldIsActive = maps:get(is_active, OldMeta, false),
-    case {OldIsActive, NewIsActive} of
-        {false, false} ->
-            {Old, New};
-        {false, true} ->
-            {
-                Old,
-                [[<<"'db'">>, <<"'active'">>, <<"'T'">>, QUID | QFullName]|New]
-            };
-        {true, false} ->
-            {
-                [[<<"'db'">>, <<"'active'">>, <<"'T'">>, QUID]|Old],
-                New
-            };
-        {true, true} ->
-            {Old, New}
-    end.
+%%make_activate_time(Old, New, OldMeta, Meta, QUID, QFullName) ->
+%%    NewIsActive = maps:get(is_active, Meta, false),
+%%    OldIsActive = maps:get(is_active, OldMeta, false),
+%%    case {OldIsActive, NewIsActive} of
+%%        {false, false} ->
+%%            {Old, New};
+%%        {false, true} ->
+%%            {
+%%                Old,
+%%                [[<<"'db'">>, <<"'active'">>, <<"'T'">>, QUID | QFullName]|New]
+%%            };
+%%        {true, false} ->
+%%            {
+%%                [[<<"'db'">>, <<"'active'">>, <<"'T'">>, QUID]|Old],
+%%                New
+%%            };
+%%        {true, true} ->
+%%            {Old, New}
+%%    end.
 
 
-make_expires(Old, New, OldMeta, Meta, QUID, QFullName) ->
-    NewExpires = maps:get(expires_time, Meta, <<>>),
-    OldExpires = maps:get(expires_time, OldMeta, <<>>),
-    case {OldExpires, NewExpires} of
+make_activate_time(Old, New, OldMeta, Meta, QUID, QFullName) ->
+    NewActivate = maps:get(activate_time, Meta, <<>>),
+    OldActivate = maps:get(activate_time, OldMeta, <<>>),
+    case {OldActivate, NewActivate} of
         {Same, Same} ->
             {Old, New};
         {<<>>, Time} ->
             {
                 Old,
-                [[<<"'db'">>, <<"'expires'">>, quote(Time), QUID | QFullName]|New]
+                [[<<"'db'">>, <<"'activate'">>, quote(Time), QUID | QFullName]|New]
             };
         {OldTime, <<>>} ->
             {
-                % Since there is no expires, we remove all
-                [[<<"'db'">>, <<"'expires'">>, quote(OldTime), QUID]|Old],
+                % Since there is no activate, we remove all
+                [[<<"'db'">>, <<"'activate'">>, quote(OldTime), QUID]|Old],
                 New
             };
         {OldTime, NewTime} ->
             {
                 % We cannot remove all, since it can remove also the new
-                [[<<"'db'">>, <<"'expires'">>, quote(OldTime), QUID]|Old],
-                [[<<"'db'">>, <<"'expires'">>, quote(NewTime), QUID | QFullName]|New]
+                [[<<"'db'">>, <<"'activate'">>, quote(OldTime), QUID]|Old],
+                [[<<"'db'">>, <<"'activate'">>, quote(NewTime), QUID | QFullName]|New]
             }
     end.
 
