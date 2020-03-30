@@ -118,7 +118,7 @@ actor_db_create(SrvId, Actor, Opts) ->
 
 
 %% @doc Must update a new actor on disk.
--spec actor_db_update(id(), actor(), db_opts()) ->
+-spec actor_db_update(id(), actor()|[actor()], db_opts()) ->
     {ok, Meta::map()} | {error, term()} | continue().
 
 actor_db_update(SrvId, Actor, Opts) ->
